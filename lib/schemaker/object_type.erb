@@ -1,0 +1,69 @@
+ <%=model.name%>Type = GraphQL::ObjectType.define do
+  name "<%=model.name%>"
+  description "Type for <%=model.name%> object"
+
+  interfaces [::GraphQL::Relay::Node.interface]
+
+  <%
+  attributes.each do |name, attribute|
+    association = nil
+
+    if attribute.key? :association
+      association = attribute[:association]
+    elsif model.respond_to? :reflect_on_all_associations
+      model.reflect_on_all_associations.map(&:foreign_key).include?(attribute[:property])
+      association = model.reflect_on_all_associations.select { |a| a.foreign_key == attribute[:property] }.first
+    end
+
+    if model.respond_to? :primary_key and name.to_s == model.primary_key
+    %>
+  global_id_field :<%=name%>
+    <%
+    elsif association.present?
+      object_model = association.klass
+
+      if association.macro == :has_many
+        list_or_connection = nil
+        while list_or_connection.nil?
+          STDOUT.puts "Should many type `#{name}` on #{model.name} be a list or connection? (\e[34mgl = list \e[39m| \e[32mac = connection \e[39m| \e[93msh = help\e[39m)."
+          command = STDIN.gets.chomp.downcase
+          case command
+          when "c"
+            list_or_connection = :connection
+          when "l"
+            list_or_connection = :list
+          when "h"
+            STDOUT.puts "Lists return all objects in the association. Use connections if pagination is necessary."
+          end
+        end
+
+        if list_or_connection == :connection
+    %>
+  connection :<%=association.pural_name%>, <%=object_model.is_a?(model) ? "-> { " : ""%><%=object_model%>Type.connection_type<%=object_model.is_a?(model) ? " } " : ""%>, "Association to many `<%=association.plural_name%>` on <%=model.name%>"
+    <%
+        else
+    %>
+  field :<%=association.pural_name%>, <%=object_model.is_a?(model) ? "-> { " : ""%><%=object_model%>Type.to_list_type<%=object_model.is_a?(model) ? " } " : ""%>, "Association to many `<%=association.plural_name%>` on <%=model.name%>"
+    <%
+        end
+      else
+    %>
+  field :<%=association.name%>, <%=object_model.is_a?(model) ? "-> { " : ""%><%=object_model%>Type<%=object_model.is_a?(model) ? " } " : ""%>, "Association to one `<%=association.name%>` on <%=model.name%>"
+    <%
+      end
+    else
+      scalar_types = { :id => "types.ID", :boolean => "types.Boolean", :integer => "types.Int", :float => "types.Float", :decimal => "types.Float", :string => "types.String"}
+      field_scalar_type =
+        if scalar_types.key? attribute[:type].to_sym
+          scalar_types[attribute[:type].to_sym]
+        else
+          scalar_types[:string]
+        end
+    %>
+  field :<%=name%>, <%=field_scalar_type%>, "Property `<%=attribute[:property]%>` for <%=model.name%>"<%=attribute[:property].to_s != name.to_s ? ", property: :#{attribute[:property]}" : ""%>
+    <%
+    end
+  end
+  %>
+
+end
