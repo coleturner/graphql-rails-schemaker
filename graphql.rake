@@ -42,7 +42,7 @@ namespace :graphql do
     schema_to_string = lambda { |model, attributes|
       ApplicationController.render(
         file: "./lib/graphql-schemaker/object_type.erb",
-        locals: { model: model, attributes: attributes },
+        locals: { model: model, attributes: attributes, all_models: models },
         layout: nil
       )
     }
@@ -98,6 +98,11 @@ namespace :graphql do
         File.open(middleware_rb_file, 'w+') { |file| file.write(src) }
       end
     end
+
+    # Todo
+    # => Generate Enum
+    # => Generate Union Types
+    # => => puts "inverse_of = #{all_models.select { |m| m.reflect_on_all_associations.select{|j| j.options[:as] == association.name}.present?} }"
 
 
     models.each do |model|
@@ -250,10 +255,6 @@ namespace :graphql do
       put_object_type.call(object_type_file, model, attr_composed)
 
       # Todo
-
-      # 1. Generate object types
-      # => Enum (from Rails)
-
       # 2. Generate input types
       # 3. Generate generic mutations
       # 4. Generate generic resolvers (if using graphql-rails-resolver)
