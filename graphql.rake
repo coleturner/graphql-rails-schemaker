@@ -1,4 +1,5 @@
 require 'fileutils'
+require 'set'
 
 namespace :graphql do
   desc "Tasks for operating a GraphQL Schema Server"
@@ -16,7 +17,7 @@ namespace :graphql do
 
   task generate: :environment do
     if File.exist? "./app/graph/schema.rb"
-      abort "Another schema already exists @ ./app/graph/schema.rb"
+      abort "\e[1mAnother schema already exists @ ./app/graph/schema.rb\e[0m"
     end
 
     # Ensure directories are available
@@ -70,7 +71,7 @@ namespace :graphql do
     # The Main Schema entry point
     schema_rb_file = "./app/graph/schema.rb"
     unless File.exist? schema_rb_file
-      STDOUT.puts "Generating Schema Object..."
+      STDOUT.puts "\e[1m\e[32mGenerating Schema Root...\e[0m"
 
       middleware = name_format == :camel ? "middleware AuthorizationMiddleware.new" : ""
 
@@ -99,31 +100,61 @@ namespace :graphql do
       end
     end
 
-    # Todo
-    # => Generate Enum
-    # => Generate Union Types
-    # => => puts "inverse_of = #{all_models.select { |m| m.reflect_on_all_associations.select{|j| j.options[:as] == association.name}.present?} }"
+    fake_association = Class.new(Object) {
+      def initialize(model, plural_name:, macro: :has_many, polymorphic: false)
+          @model = model
+          @plural_name = plural_name || model.name.pluralize
+          @macro = macro
+          @polymorphic = polymorphic
+      end
 
+      def klass() @model end
+      def macro() @macro end
+      def plural_name() @plural_name end
+      def polymorphic?() @polymorphic end
+      def collection?() [:has_many, :has_and_belongs_to_many].include?(@macro) end
+    }
 
+    STDOUT.puts ""
+    STDOUT.puts "\e[1m\e[32mGenerating Object Types...\e[0m"
+
+    active_models = []
+    active_models_attributes = {}
     models.each do |model|
       model.connection
       skipped = false
       STDOUT.puts
       STDOUT.puts "----------------------------------"
-      STDOUT.puts "\e[1mGenerating schema for model: \e[32m#{model}\e[0m"
-      attributes = []
+      STDOUT.puts "\e[1mGenerating type for model: \e[32m#{model}\e[0m"
+      attributes = Set.new
       attribute_types = {}
       attribute_properties = {}
+      attribute_associations = {}
 
+      # Track all the columns
       model.columns.each do |column|
         name = column.name
         type = column.type
 
         new_name = name_format == :camel ? name.camelize(:lower).to_sym : name.underscore.to_sym
-        attributes.push(new_name)
+        attributes.add(new_name)
         attribute_types[new_name] = type
         attribute_properties[new_name] = name
       end
+
+      # Track all associations
+      model.reflect_on_all_associations.each do |association|
+        name = association.collection? ? association.plural_name.to_s : association.name.to_s
+        type = :object
+
+        new_name = name_format == :camel ? name.camelize(:lower).to_sym : name.underscore.to_sym
+        attributes.add(new_name)
+        attribute_types[new_name] = type
+        attribute_properties[new_name] = name
+        attribute_associations[new_name] = association
+      end
+
+      puts "attributes = #{attributes.to_a}"
 
       # Process commands for each model
       last_input = $_
@@ -131,7 +162,7 @@ namespace :graphql do
       while last_input != "g"
         unless is_repeating
           STDOUT.puts
-          STDOUT.puts "Using attributes: #{attributes.join(", ")}"
+          STDOUT.puts "Using attributes: #{attributes.to_a.join(", ")}"
           STDOUT.puts "To continue, enter one of the following commands: (\e[34mg = generate \e[39m| \e[31mr = remove attribute \e[39m| \e[32ma = add attribute \e[39m| \e[93ms = skip model\e[39m)"
           command = STDIN.gets.chomp.downcase
         end
@@ -201,7 +232,7 @@ namespace :graphql do
             attribute_properties[name] = property
           end
 
-          attributes.push(name.to_sym)
+          attributes.add(name.to_sym)
 
         when "r"
           STDOUT.puts "Enter the name of the attribute to remove:"
@@ -230,7 +261,7 @@ namespace :graphql do
           end
 
           STDOUT.puts "Removing attribute \"#{remove_attr}\"."
-          attributes -= [remove_attr.to_sym]
+          attributes.delete(remove_attr.to_sym)
           is_repeating = false
         when "g"
           break
@@ -241,18 +272,28 @@ namespace :graphql do
       end
 
       if skipped
+        STDOUT.puts "\e[93mSkipping #{model.name}...\e[39m"
         next
       end
 
-      STDOUT.puts "Generating schema for #{model.name}..."
       object_type_file = "./app/graph/types/#{model.name.underscore}_type.rb"
       attr_composed = {}
 
       attributes.each do |attribute|
-        attr_composed[attribute] = { :type => attribute_types[attribute], :property => attribute_properties[attribute] }
+        hash = { :type => attribute_types[attribute], :property => attribute_properties[attribute] }
+
+        if attribute_associations.key? attribute
+          hash[:association] = attribute_associations[attribute]
+        end
+
+        attr_composed[attribute] = hash
       end
 
       put_object_type.call(object_type_file, model, attr_composed)
+
+      # Save this config for later
+      active_models.push(model)
+      active_models_attributes[model] = attr_composed
 
       # Todo
       # 2. Generate input types
@@ -261,51 +302,169 @@ namespace :graphql do
 
     end
 
-    # Generate root type for query root
-    root_type_name = nil
-    STDOUT.puts "Define the root type to expose your object types: (letters only) (default = \e[32m#{root_type_name}\e[0m)"
+    STDOUT.puts ""
+    STDOUT.puts "----------------------------------"
+    STDOUT.puts ""
+
+    # Generate enums from generated models
+    polymorphics = active_models.map { |m| m.reflect_on_all_associations.select(&:polymorphic?) }.flatten
+    if polymorphics.present?
+      STDOUT.puts "\e[1m\e[32mGenerating Union Types...\e[0m"
+      polymorphics.each do |polymorphic|
+
+        STDOUT.puts "----------------------------------"
+        STDOUT.puts "\e[1mGenerating type for union: \e[32m#{polymorphic.name.to_s.camelize}Type\e[0m"
+
+        polymorphic_rb_file = "./app/graph/types/#{polymorphic.name}_union.rb"
+        associations = active_models.select { |m| m.reflect_on_all_associations.select{ |j| j.options[:as] == polymorphic.name }.present? }
+
+          src = ApplicationController.render(
+            file: "./lib/graphql-schemaker/union_type.erb",
+            locals: { polymorphic: polymorphic, associations: associations },
+            layout: nil
+          )
+
+          File.open(polymorphic_rb_file, 'w+') { |file| file.write(src) }
+      end
+    end
+
+    STDOUT.puts ""
+    STDOUT.puts "----------------------------------"
+    STDOUT.puts ""
+
+    STDOUT.puts "\e[1m\e[32mGenerating Query Root...\e[0m"
+    STDOUT.puts "A query root is the entry point to your Schema."
+    STDOUT.puts ""
+    STDOUT.puts "If you plan to use Relay v1, your Schema needs a global node to work properly."
+    STDOUT.puts "See https://github.com/facebook/relay/issues/112 for more info."
+
+    STDOUT.puts ""
+    STDOUT.puts "----------------------------------"
+    STDOUT.puts ""
+
+    STDOUT.puts "How would you like to generate your query root?"
+    STDOUT.puts "1 - Use Global Node (default)"
+    STDOUT.puts "2 - Expose all fields on query root"
+    STDOUT.puts ""
+
     command = STDIN.gets.chomp.downcase
-    while root_type_name.nil?
-      if command.empty?
+    until ["1", "2", ""].include?(command)
+      STDOUT.puts "\"#{command}\" not recognized."
+      command = STDIN.gets.chomp.downcase
+    end
+
+    if command == ""
+      command = "1"
+    end
+
+    # Generate global node for query root
+    if command == "1"
+      root_type_name = nil
+
+      # Check if developers already made a global node model
+      if active_models.map(&:name).include? "Viewer"
+        STDOUT.puts "A model by the name 'Viewer' already exists. Should this model be the global node? (Y/n)"
+
+        command = STDIN.gets.chomp.downcase
+        until ["y", "n", ""].include?(command)
+          STDOUT.puts "\"#{command}\" not recognized."
+          command = STDIN.gets.chomp.downcase
+        end
+
+        if command == ""
+          command = "y"
+        end
+
         root_type_name = "Viewer"
-      else
-        unless str[/[a-zA-Z]+/] == command
-          STDOUT.puts "Root type name must contain only letters. No numbers or special characters."
-          next
+
+        # Reconfigure the file
+        model = active_models.select { |m| m.name == "Viewer" }.first
+        attributes = active_models_attributes[model]
+
+        root_type_attr = {}
+
+        active_models.map do |model|
+          key = model.name.pluralize
+
+          while key.nil? or attributes.key? key
+            STDOUT.puts "Field #{key} already exists on #{root_type_name}. Enter a new name for the field:"
+            command = STDIN.gets.chomp.downcase
+            unless command[/[a-zA-Z]+/] == command
+              command = nil
+            end
+
+            key = command
+          end
+
+          if name_format == :camel
+            key = key.camelize(:lower)
+          else
+            key = key.underscore
+          end
+
+          association = fake_association.new(model, plural_name: key)
+          association.polymorphic?
+
+          root_type_attr[key] = { :type => :id, :association => association}
         end
 
-        if models.map(&:name).include?(command)
-          STDOUT.puts "Root type name must not be an existing model."
-          next
+        object_type_file = "./app/graph/types/#{model.name.underscore}_type.rb"
+        put_object_type.call(object_type_file, model, attributes.merge(root_type_attr))
+      else
+        STDOUT.puts "Define the root type to expose your object types: (letters only) (default = \e[32mViewer\e[0m)"
+        name_command = STDIN.gets.chomp.downcase
+        while root_type_name.nil?
+          if name_command.empty?
+            root_type_name = "Viewer"
+          else
+            unless name_command[/[a-zA-Z]+/] == name_command
+              STDOUT.puts "Root type name must contain only letters. No numbers or special characters."
+              next
+            end
+
+            if models.map(&:name).include?(name_command)
+              STDOUT.puts "A model already exists by that name. Are you sure? (y/N)"
+              command = STDIN.gets.chomp.downcase
+              until ["y", "n", ""].include?(command)
+                STDOUT.puts "\"#{command}\" not recognized."
+                command = STDIN.gets.chomp.downcase
+              end
+
+              if command == ""
+                command = "n"
+              end
+
+              if command == "n"
+                next
+              end
+            end
+
+            root_type_name = name_command.classify
+          end
         end
 
-        root_type_name = command.classify
+        # Generate global node type with generated models
+        Object.const_set(root_type_name, Class.new { def name() root_type_name end  })
+
+        root_type_attr = {}
+        active_models.each do |model|
+          key = model.name.pluralize
+
+          if name_format == :camel
+            key = key.camelize(:lower)
+          else
+            key = key.underscore
+          end
+
+          association = fake_association.new(model, plural_name: key)
+          root_type_attr[key] = { :type => :id, :association => association}
+        end
+
+        root_object_type_file = "./app/graph/types/#{root_type_name.underscore}_type.rb"
+        put_object_type.call(root_object_type_file, root_type_name.constantize, root_type_attr)
+
       end
     end
-
-    # Generate root object type with every model
-    Object.const_set(root_type_name, Class.new { def name() root_type_name end  })
-
-    root_type_attr = model.map do |model|
-      key = model.name.pluralize
-
-      if name_format == :camel
-        key = key.camelize(:lower)
-      else
-        key = key.underscore
-      end
-
-      association = Class.new {
-          def klass() model end
-          def macro() :has_many end
-          def plural_name() key end
-      }
-
-      { :type => :id, :association => association}
-    end
-
-    root_object_type_file = "./app/graph/types/#{root_type_name.underscore}_type.rb"
-    put_object_type.call(root_object_type_file, root_type_name.constantize, root_type_attr)
 
     # Generate the Query root type (include)
     query_type_rb_file = "./app/graph/types/#{query_type_name.underscore}.rb"
@@ -320,6 +479,9 @@ namespace :graphql do
 
       File.open(query_type_rb_file, 'w+') { |file| file.write(src) }
     end
+
+
+    STDOUT.puts "\e[32mDone...\e[0m"
 
 
   end
