@@ -1,11 +1,11 @@
-<%= query_type_name %> = GraphQL::ObjectType.define do
+<%== query_type_name %> = GraphQL::ObjectType.define do
   name "Query"
   description "The query root of this schema"
 
-  field :<%=root_type_name.undescore%> do
-    type <%=root_type_name%>Type
+  field :<%==root_type_name.underscore%> do
+    type <%==root_type_name%>Type
     resolve -> (obj, args, ctx) {
-      ctx[:<%=root_type_name.undescore%>]
+      ctx[:<%==root_type_name.underscore%>]
     }
   end
 
