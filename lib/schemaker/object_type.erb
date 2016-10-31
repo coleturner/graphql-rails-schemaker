@@ -5,7 +5,7 @@
   interfaces [::GraphQL::Relay::Node.interface]
 
   <%
-  attributes.sort_by { |k,v| [k == :id ? 0 : 1, k] }.each do |name, attribute|
+  attributes.each do |name, attribute|
     association = nil
 
     if attribute.key? :association
