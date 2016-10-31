@@ -1,16 +1,36 @@
 # graphql-rails-schemaker
-A rake task to interactive create a GraphQL Schema for Rails Models.
+A rake task to interactively create a GraphQL Schema for Rails Models.
 
-## To generate a base schema:
-- Run "rails graphql:generate"
-- When prompted, enter "c" or "s" for camel case or snake case output respectively.
-- Follow the prompts to generate the schema.
+## Getting Started
+- Add `graphql-rails-schemaker` to your Gemfile.
+- Run `bundle install`
+- Run `rails schemaker:generate`
+- Follow the prompts until it is done generating schema.
+- Report any bugs or inconsistencies to make this application better.
 
+## Features
+### Schema
+- Object Types
+- Enum Types
+- Union Types
+- Query Root
+- Mutation Root
+
+### Smart Generation
+- Association detection between models
+- Automatic field for one-to-one associations
+- Prompts for "many" associations - choice between GraphQL List or Connections
+- Detects if naming overlaps with models (prompts for renaming)
+- Global Node Support (for Relay v1)
+- Camel Case with Middleware (for JavaScript type :camelCase fields)
+- Snake Case without middleware
 
 ### Word of Caution
+**This project is meant to generate a basic schema to cover a wide variety of uses. It is not a magical cure-all for your application's needs.**
+
 This tool is designed to facilitate setup of a GraphQL Schema in Rails 5 Application. It has not been tested in any prior verison of Rails. This task will not run it if detects a previous setup @ `./app/graph/schema.rb` It will overwrite any files in `./app/graph/` if no `schema.rb` exists.
 
-GraphQL Rails Schemaker is not a one-size-fits all solution. It will create a "base" schema including object types and sub-type dependencies from all models existing in the Rails application. It has been designed to formulate a generic schema to fit a wide variety of applications with support for associations.
+It will create a "base" schema including object types and sub-type dependencies from all models existing in the Rails application. It has been designed to formulate a generic schema to fit a wide variety of applications with support for associations.
 
 **Do not run this in production environments.**
 
