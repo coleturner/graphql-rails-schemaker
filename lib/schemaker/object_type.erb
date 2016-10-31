@@ -55,15 +55,15 @@
         <%
       end
     else
-      scalar_types = { :id => "types.ID", :boolean => "types.Boolean", :integer => "types.Int", :float => "types.Float", :decimal => "types.Float", :string => "types.String"}
-      field_scalar_type =
-        if attribute[:type].present? and scalar_types.key? attribute[:type].to_sym
-          scalar_types[attribute[:type].to_sym]
+      type_str =
+        if attribute.key? :type and attribute[:type].present?
+          attribute[:type]
         else
-          scalar_types[:string]
+          "types.String"
         end
+        
         %>
-  field :<%==name%>, <%==field_scalar_type%>, "Property `<%==attribute[:property]%>` for <%==model.name%>"<%==attribute[:property].to_s != name.to_s ? ", property: :#{attribute[:property]}" : ""%>
+  field :<%==name%>, <%==type_str%>, "Property `<%==attribute[:property]%>` for <%==model.name%>"<%==attribute[:property].to_s != name.to_s ? ", property: :#{attribute[:property]}" : ""%>
         <%
     end
   end
