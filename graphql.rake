@@ -39,8 +39,8 @@ namespace :graphql do
         :snake
       end
 
-    # Function to convert types to string
-    schema_to_string = lambda { |model, attributes|
+    # Function to convert object types to string
+    object_type_to_string = lambda { |model, attributes|
       ApplicationController.render(
         file: "./lib/graphql-schemaker/object_type.erb",
         locals: { model: model, attributes: attributes, all_models: models },
@@ -48,9 +48,23 @@ namespace :graphql do
       )
     }
 
-    # Function to write schema
+    # Function to convert enum types to string
+    enum_type_to_string = lambda { |name, values|
+      ApplicationController.render(
+        file: "./lib/graphql-schemaker/enum_type.erb",
+        locals: { name: name, values: values },
+        layout: nil
+      )
+    }
+
+    # Function to write object types
     put_object_type = lambda { |file, model, attributes|
-      File.open(file, 'w+') { |file| file.write(schema_to_string.call(model, attributes)) }
+      File.open(file, 'w+') { |file| file.write(object_type_to_string.call(model, attributes)) }
+    }
+
+    # Function to write enum types
+    put_enum_type = lambda { |file, name, value|
+      File.open(file, 'w+') { |file| file.write(enum_type_to_string.call(name, value)) }
     }
 
     STDOUT.puts "Using #{name_format == :camel ? 'camel case' : 'snake case'}"
@@ -115,10 +129,35 @@ namespace :graphql do
       def collection?() [:has_many, :has_and_belongs_to_many].include?(@macro) end
     }
 
+    scalar_types = { :id => "types.ID", :boolean => "types.Boolean", :integer => "types.Int", :float => "types.Float", :decimal => "types.Float", :string => "types.String"}
+
+    guess_type = lambda { |model, name|
+      return :enum if model.defined_enums.key?(name)
+      matches = model.columns.select { |c| c.name == name }
+
+      return matches.first.type if matches.present?
+
+      :string
+    }
+
+    graphl_field_type = Proc.new { |type, name|
+      graphql_type = nil
+      graphql_type = scalar_types[type.to_sym] if scalar_types.key? type.to_sym
+
+      if type == :enum
+        graphql_type = "#{name.to_s.camelize}Enum"
+      end
+
+      graphql_type = scalar_types[:string] if type.nil?
+
+      graphql_type
+    }
+
     STDOUT.puts ""
     STDOUT.puts "\e[1m\e[32mGenerating Object Types...\e[0m"
 
     active_models = []
+    active_enum = {}
     active_models_attributes = {}
     models.each do |model|
       model.connection
@@ -128,17 +167,27 @@ namespace :graphql do
       STDOUT.puts "\e[1mGenerating type for model: \e[32m#{model}\e[0m"
       attributes = Set.new
       attribute_types = {}
+      attribute_graphql_types = {}
       attribute_properties = {}
       attribute_associations = {}
 
       # Track all the columns
       model.columns.each do |column|
         name = column.name
-        type = column.type
+
+        type_sym =
+          if model.defined_enums.key? name
+            :enum
+          else
+            column.type
+          end
+
+        graphql_type = graphl_field_type.call(type_sym, name)
 
         new_name = name_format == :camel ? name.camelize(:lower).to_sym : name.underscore.to_sym
         attributes.add(new_name)
-        attribute_types[new_name] = type
+        attribute_types[new_name] = type_sym
+        attribute_graphql_types[new_name] = graphql_type
         attribute_properties[new_name] = name
       end
 
@@ -150,11 +199,10 @@ namespace :graphql do
         new_name = name_format == :camel ? name.camelize(:lower).to_sym : name.underscore.to_sym
         attributes.add(new_name)
         attribute_types[new_name] = type
+        attribute_graphql_types[new_name] = graphl_field_type.call(type, name)
         attribute_properties[new_name] = name
         attribute_associations[new_name] = association
       end
-
-      puts "attributes = #{attributes.to_a}"
 
       # Process commands for each model
       last_input = $_
@@ -233,6 +281,8 @@ namespace :graphql do
           end
 
           attributes.add(name.to_sym)
+          attribute_types[name.to_sym] = type
+          attribute_graphql_types[name.to_sym] = graphl_field_type.call(type, name.to_sym)
 
         when "r"
           STDOUT.puts "Enter the name of the attribute to remove:"
@@ -262,6 +312,10 @@ namespace :graphql do
 
           STDOUT.puts "Removing attribute \"#{remove_attr}\"."
           attributes.delete(remove_attr.to_sym)
+          attribute_types.delete remove_attr.to_sym
+          attribute_graphql_types.delete remove_attr.to_sym
+          attribute_properties.delete remove_attr.to_sym
+
           is_repeating = false
         when "g"
           break
@@ -280,10 +334,14 @@ namespace :graphql do
       attr_composed = {}
 
       attributes.each do |attribute|
-        hash = { :type => attribute_types[attribute], :property => attribute_properties[attribute] }
+        hash = { :type => attribute_types[attribute], :graphql_type => attribute_graphql_types[attribute], :property => attribute_properties[attribute] }
 
         if attribute_associations.key? attribute
           hash[:association] = attribute_associations[attribute]
+        end
+
+        if model.defined_enums.key? hash[:property]
+          active_enum[attribute.to_s.camelize] = model.defined_enums[hash[:property]]
         end
 
         attr_composed[attribute] = hash
@@ -302,18 +360,32 @@ namespace :graphql do
 
     end
 
+    puts "active_enum = #{active_enum}"
+    if active_enum.present?
+      STDOUT.puts ""
+      STDOUT.puts "----------------------------------"
+      STDOUT.puts ""
+      STDOUT.puts "\e[1m\e[32mGenerating Enum Types...\e[0m"
+
+      active_enum.each do |name, values|
+      enum_type_file = "./app/graph/types/#{name.underscore}_enum.rb"
+
+        STDOUT.puts "\e[34m#{name}Enum\e[0m"
+        put_enum_type.call(enum_type_file, name, values)
+      end
+  end
+
     STDOUT.puts ""
     STDOUT.puts "----------------------------------"
     STDOUT.puts ""
 
-    # Generate enums from generated models
+    # Generate union types from generated models
     polymorphics = active_models.map { |m| m.reflect_on_all_associations.select(&:polymorphic?) }.flatten
     if polymorphics.present?
       STDOUT.puts "\e[1m\e[32mGenerating Union Types...\e[0m"
       polymorphics.each do |polymorphic|
 
-        STDOUT.puts "----------------------------------"
-        STDOUT.puts "\e[1mGenerating type for union: \e[32m#{polymorphic.name.to_s.camelize}Type\e[0m"
+        STDOUT.puts "\e[34m#{polymorphic.name.to_s.camelize}Type\e[0m"
 
         polymorphic_rb_file = "./app/graph/types/#{polymorphic.name}_union.rb"
         associations = active_models.select { |m| m.reflect_on_all_associations.select{ |j| j.options[:as] == polymorphic.name }.present? }
@@ -348,12 +420,12 @@ namespace :graphql do
     STDOUT.puts ""
 
     command = STDIN.gets.chomp.downcase
-    until ["1", "2", ""].include?(command)
+    until ["1", "2", "", "g"].include? command
       STDOUT.puts "\"#{command}\" not recognized."
       command = STDIN.gets.chomp.downcase
     end
 
-    if command == ""
+    if ["", "g"].include? command
       command = "1"
     end
 
@@ -366,12 +438,12 @@ namespace :graphql do
         STDOUT.puts "A model by the name 'Viewer' already exists. Should this model be the global node? (Y/n)"
 
         command = STDIN.gets.chomp.downcase
-        until ["y", "n", ""].include?(command)
+        until ["y", "n", "", "g"].include?(command)
           STDOUT.puts "\"#{command}\" not recognized."
           command = STDIN.gets.chomp.downcase
         end
 
-        if command == ""
+        if ["", "g"].include? command
           command = "y"
         end
 
@@ -487,7 +559,6 @@ namespace :graphql do
 
       File.open(query_type_rb_file, 'w+') { |file| file.write(src) }
     end
-
 
     STDOUT.puts "\e[32mDone...\e[0m"
 
