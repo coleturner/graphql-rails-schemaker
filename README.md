@@ -38,10 +38,9 @@ It will create a "base" schema including object types and sub-type dependencies 
 
 
 # Todo
-- Generate Enum and Union Types
-- Add Input Type templates
-- Add Mutation Type templates
-- Integration with `graphql-rails-resolver` (if installed)
+- Add boilerplate input types
+- Add boilerplate mutation types
+- Integration with [`graphql-rails-resolver`](https://github.com/colepatrickturner/graphql-rails-resolver) (if installed)
 
 ## Needs Help
 The `object_type.rb` template is large and cumbersome. The Todo above is planned for action. If you would like to handle any of the above, please file a pull request and add your name to the credits list.
