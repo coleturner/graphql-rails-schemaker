@@ -1,0 +1,12 @@
+<%==name%>Enum = GraphQL::EnumType.define do
+  name "<%==name%>"
+  description "Enumerated values for <%==name%>"
+
+  <%
+  values.each do |key,value|
+  %>
+  value(<%==key.inspect%>, <%=="Value of \"#{value}\"".inspect%>, value: <%==value.inspect%>)
+  <%
+  end
+  %>
+end
