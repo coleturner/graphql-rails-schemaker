@@ -289,7 +289,7 @@ namespace :graphql do
         attr_composed[attribute] = hash
       end
 
-      put_object_type.call(object_type_file, model, attr_composed)
+      put_object_type.call(object_type_file, model, attr_composed.sort_by { |k,v| [k == :id ? 0 : 1, k] })
 
       # Save this config for later
       active_models.push(model)
@@ -386,11 +386,18 @@ namespace :graphql do
         active_models.map do |model|
           key = model.name.pluralize
 
-          while key.nil? or attributes.key? key
-            STDOUT.puts "Field #{key} already exists on #{root_type_name}. Enter a new name for the field:"
+          if name_format == :camel
+            key = key.camelize(:lower)
+          else
+            key = key.underscore
+          end
+
+          while key.nil? or attributes.key? key or attributes.key? key.to_sym
+            STDOUT.puts "Field `\e[31m#{key}\e[0m` already exists on `\e[32m#{root_type_name}\e[0m`. Enter a new name for the field:"
             command = STDIN.gets.chomp.downcase
-            unless command[/[a-zA-Z]+/] == command
+            unless command.present? and command[/[a-zA-Z]+/] == command
               command = nil
+              next
             end
 
             key = command
@@ -409,7 +416,8 @@ namespace :graphql do
         end
 
         object_type_file = "./app/graph/types/#{model.name.underscore}_type.rb"
-        put_object_type.call(object_type_file, model, attributes.merge(root_type_attr))
+        sorted_fields = Hash[root_type_attr.sort_by{ |k,v| k }]
+        put_object_type.call(object_type_file, model, attributes.merge(sorted_fields))
       else
         STDOUT.puts "Define the root type to expose your object types: (letters only) (default = \e[32mViewer\e[0m)"
         name_command = STDIN.gets.chomp.downcase
