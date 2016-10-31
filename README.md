@@ -2,7 +2,7 @@
 A rake task to interactively create a GraphQL Schema for Rails Models.
 
 ## Getting Started
-- Add `graphql-rails-schemaker` to your Gemfile.
+- Add `graphql-rails-schemaker` to your Gemfile's `:development` section.
 - Run `bundle install`
 - Run `rails schemaker:generate`
 - Follow the prompts until it is done generating schema.
