@@ -1,0 +1,5 @@
+<%=polymorphic.name.to_s.camelize%>TypeUnion = GraphQL::UnionType.define do
+  name "<%=polymorphic.name.to_s.camelize%>"
+  description "Objects for `<%=polymorphic.active_record.name.to_s%>`"
+  possible_types [<%=associations.map(&:name).map { |n| "#{n.to_s.camelize}Type" }.join(", ")%>]
+end

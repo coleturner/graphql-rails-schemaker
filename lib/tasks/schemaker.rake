@@ -1,7 +1,8 @@
 require 'fileutils'
 require 'set'
+require 'graphql/rails/schemaker/template_renderer'
 
-namespace :graphql do
+namespace :schemaker do
   desc "Tasks for operating a GraphQL Schema Server"
 
   task introspect: :environment do
@@ -41,20 +42,12 @@ namespace :graphql do
 
     # Function to convert object types to string
     object_type_to_string = lambda { |model, attributes|
-      ApplicationController.render(
-        file: "./lib/graphql-schemaker/object_type.erb",
-        locals: { model: model, attributes: attributes, all_models: models },
-        layout: nil
-      )
+      TemplateRenderer.render("rails/schemaker/object_type.erb", { model: model, attributes: attributes, all_models: models })
     }
 
     # Function to convert enum types to string
     enum_type_to_string = lambda { |name, values|
-      ApplicationController.render(
-        file: "./lib/graphql-schemaker/enum_type.erb",
-        locals: { name: name, values: values },
-        layout: nil
-      )
+      TemplateRenderer.render("rails/schemaker/enum_type.erb", { name: name, values: values })
     }
 
     # Function to write object types
@@ -76,8 +69,20 @@ namespace :graphql do
         query_type_name = "QueryRootType"
       elsif query_type_name == "QueryRootType"
         query_type_name = "QueryRootObjectType"
-      elsif query_type_name == "QueryRooQueryRootObjectTypetType"
+      elsif query_type_name == "QueryRootObjectType"
         STDOUT.puts "Unable to formulate a query root type name - taken: QueryType, QueryRootType, QueryRootObjectType"
+        abort "Exiting..."
+      end
+    end
+
+    mutation_type_name = "MutationType"
+    while ApplicationRecord.descendants.map(&:name).include? mutation_type_name
+      if query_type_name == "MutationType"
+        query_type_name = "MutationRootType"
+      elsif query_type_name == "MutationRootType"
+        query_type_name = "MutationRootObjectType"
+      elsif query_type_name == "MutationRootObjectType"
+        STDOUT.puts "Unable to formulate a mutation root type name - taken: MutationType, MutationRootType, MutationRootObjectType"
         abort "Exiting..."
       end
     end
@@ -89,11 +94,7 @@ namespace :graphql do
 
       middleware = name_format == :camel ? "middleware AuthorizationMiddleware.new" : ""
 
-      src = ApplicationController.render(
-        file: "./lib/graphql-schemaker/schema.erb",
-        locals: { middleware: middleware, query_type_name: query_type_name },
-        layout: nil
-      )
+      src = TemplateRenderer.render("rails/schemaker/schema.erb", { middleware: middleware, query_type_name: query_type_name, mutation_type_name: mutation_type_name })
 
       File.open(schema_rb_file, 'w+') { |file| file.write(src) }
     end
@@ -104,11 +105,7 @@ namespace :graphql do
 
       middleware_rb_file = "./app/graph/middleware/camel_case_middleware.rb"
       unless File.exist? middleware_rb_file
-        src = ApplicationController.render(
-          file: "./lib/graphql-schemaker/camel_case_middleware.erb",
-          locals: { },
-          layout: nil
-        )
+        src = TemplateRenderer.render("rails/schemaker/camel_case_middleware.erb")
 
         File.open(middleware_rb_file, 'w+') { |file| file.write(src) }
       end
@@ -355,7 +352,6 @@ namespace :graphql do
 
       # Todo
       # 2. Generate input types
-      # 3. Generate generic mutations
       # 4. Generate generic resolvers (if using graphql-rails-resolver)
 
     end
@@ -390,11 +386,7 @@ namespace :graphql do
         polymorphic_rb_file = "./app/graph/types/#{polymorphic.name}_union.rb"
         associations = active_models.select { |m| m.reflect_on_all_associations.select{ |j| j.options[:as] == polymorphic.name }.present? }
 
-          src = ApplicationController.render(
-            file: "./lib/graphql-schemaker/union_type.erb",
-            locals: { polymorphic: polymorphic, associations: associations },
-            layout: nil
-          )
+          src = TemplateRenderer.render("rails/schemaker/union_type.erb", { polymorphic: polymorphic, associations: associations })
 
           File.open(polymorphic_rb_file, 'w+') { |file| file.write(src) }
       end
@@ -466,7 +458,7 @@ namespace :graphql do
 
           while key.nil? or attributes.key? key or attributes.key? key.to_sym
             STDOUT.puts "Field `\e[31m#{key}\e[0m` already exists on `\e[32m#{root_type_name}\e[0m`. Enter a new name for the field:"
-            command = STDIN.gets.chomp.downcase
+            command = STDIN.gets.chomp
             unless command.present? and command[/[a-zA-Z]+/] == command
               command = nil
               next
@@ -551,14 +543,23 @@ namespace :graphql do
     unless File.exist? query_type_rb_file
       STDOUT.puts "Generating Query Root Type..."
 
-      src = ApplicationController.render(
-        file: "./lib/graphql-schemaker/query_type.erb",
-        locals: { query_type_name: query_type_name, root_type_name: root_type_name },
-        layout: nil
-      )
+      src = TemplateRenderer.render("rails/schemaker/query_type.erb", { query_type_name: query_type_name, root_type_name: root_type_name })
 
       File.open(query_type_rb_file, 'w+') { |file| file.write(src) }
     end
+
+
+    # Generate the Mutation root type (include)
+    # TODO - Add Mutations
+    mutation_type_rb_file = "./app/graph/types/#{mutation_type_name.underscore}.rb"
+    unless File.exist? mutation_type_rb_file
+      STDOUT.puts "Generating Mutation Root Type..."
+
+      src = TemplateRenderer.render("rails/schemaker/mutation_type.erb", { mutation_type_name: mutation_type_name })
+
+      File.open(mutation_type_rb_file, 'w+') { |file| file.write(src) }
+    end
+
 
     STDOUT.puts "\e[32mDone...\e[0m"
 

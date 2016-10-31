@@ -1,6 +1,6 @@
 Schema = GraphQL::Schema.define do
-  query <%== query_type_name %>
-  mutation MutationType
+  query <%= query_type_name %>
+  mutation <%= mutation_type_name %>
 
   resolve_type -> (object, ctx) {
     Schema.types[object.class.name]
@@ -20,5 +20,5 @@ Schema = GraphQL::Schema.define do
     GraphQL::Schema::UniqueWithinType.encode(type_defn.name, obj.id)
   }
 
-  <%== middleware %>
+  <%= middleware %>
 end
