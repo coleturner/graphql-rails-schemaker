@@ -28,7 +28,7 @@ namespace :schemaker do
 
     # Load our application
     Rails.application.eager_load!
-    models = ApplicationRecord.descendants.collect { |type| type }
+    models = ActiveRecord::Base.descendants.collect { |type| type }
     scalar_types = [:string, :integer, :float, :id, :boolean]
 
     # Determine whether to do snake case or camel case
@@ -64,7 +64,7 @@ namespace :schemaker do
 
     # Schema vars
     query_type_name = "QueryType"
-    while ApplicationRecord.descendants.map(&:name).include? query_type_name
+    while ActiveRecord::Base.descendants.map(&:name).include? query_type_name
       if query_type_name == "QueryType"
         query_type_name = "QueryRootType"
       elsif query_type_name == "QueryRootType"
@@ -76,7 +76,7 @@ namespace :schemaker do
     end
 
     mutation_type_name = "MutationType"
-    while ApplicationRecord.descendants.map(&:name).include? mutation_type_name
+    while ActiveRecord::Base.descendants.map(&:name).include? mutation_type_name
       if query_type_name == "MutationType"
         query_type_name = "MutationRootType"
       elsif query_type_name == "MutationRootType"
